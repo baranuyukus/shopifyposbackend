@@ -1,0 +1,1163 @@
+================================================================================
+          SHOPIFY POS - SİPARİŞ OLUŞTURMA ENDPOINT'İ DETAYLI KULLANIM REHBERİ
+================================================================================
+
+ENDPOINT: POST /orders/create-cart
+
+Bu endpoint, mağazanızda sipariş oluşturmanızı sağlar. Hem barkodlu ürünler 
+hem de özel/manuel ürünler aynı sipariş içinde olabilir. Ayrıca mevcut bir 
+müşteriye sipariş atayabilir veya yeni müşteri oluşturabilirsiniz.
+
+================================================================================
+                              ÖZELLİKLER
+================================================================================
+
+✅ Karışık Sepet Desteği
+   - Barkodlu ürünler (envanterden)
+   - Özel/Manuel ürünler (envanterde olmayan)
+   - İkisi birlikte aynı sipariş içinde
+
+✅ Müşteri Yönetimi
+   - Mevcut müşteri ile sipariş (email ile)
+   - Yeni müşteri oluşturarak sipariş
+   - Adres bilgileri ile birlikte
+
+✅ Ödeme Seçenekleri
+   - Nakit (cash)
+   - POS/Kredi Kartı (pos)
+
+✅ İndirim Sistemi
+   - Sipariş toplamından indirim
+   - İndirim nedeni belirtme
+
+================================================================================
+                          TEMEL KULLANIM YAPISI
+================================================================================
+
+REQUEST URL:
+POST http://localhost:8080/orders/create-cart
+
+HEADERS:
+Content-Type: application/json
+
+REQUEST BODY YAPISI:
+{
+  "items": [...],              // Ürün listesi (zorunlu)
+  "payment_method": "...",     // "cash" veya "pos" (zorunlu)
+  "email": "...",              // Mevcut müşteri için (opsiyonel)
+  "new_customer": {...},       // Yeni müşteri için (opsiyonel)
+  "discount": 0,               // İndirim tutarı (opsiyonel)
+  "discount_reason": "..."     // İndirim nedeni (opsiyonel)
+}
+
+ÖNEMLİ: "email" VEYA "new_customer" alanlarından BİRİNİ kullanmalısınız!
+         İkisini birden kullanamazsınız.
+
+================================================================================
+                        ÜRÜN TİPLERİ (ITEMS ARRAY)
+================================================================================
+
+Sipariş içinde 2 tip ürün olabilir:
+
+1. BARKODLU ÜRÜN (Envanterden)
+   -------------------------------
+   {
+     "barcode": "88834856",    // Ürün barkodu (zorunlu)
+     "quantity": 2             // Adet (zorunlu, default: 1)
+   }
+
+2. ÖZEL/MANUEL ÜRÜN (Envanterde olmayan)
+   -------------------------------
+   {
+     "type": "custom",         // Tip belirteci (zorunlu)
+     "title": "Özel Tişört",   // Ürün adı (zorunlu)
+     "size": "XL",             // Beden/Boyut (opsiyonel)
+     "price": 250.0,           // Birim fiyat (zorunlu)
+     "quantity": 1             // Adet (opsiyonel, default: 1)
+   }
+
+================================================================================
+                    MÜŞTERİ SEÇENEKLERİ (2 YÖNTEM)
+================================================================================
+
+YÖNTEM 1: MEVCUT MÜŞTERİ İLE SİPARİŞ
+-------------------------------------
+
+Sistemde kayıtlı bir müşterinin email'ini kullanarak sipariş oluşturursunuz.
+
+KULLANIM:
+{
+  "items": [...],
+  "payment_method": "cash",
+  "email": "mevcut@musteri.com"    // ← Mevcut müşteri email'i
+}
+
+NASIL ÇALIŞIR:
+1. Sistem önce yerel veritabanında bu email'i arar
+2. Bulamazsa Shopify'da arar
+3. Shopify'da bulursa yerel DB'ye kaydeder
+4. Bulamazsa hata döner
+
+HATA DURUMU:
+Eğer müşteri hiçbir yerde bulunamazsa:
+{
+  "detail": "Customer with email 'xxx@example.com' not found. 
+             Use 'new_customer' to create a new one."
+}
+
+
+YÖNTEM 2: YENİ MÜŞTERİ OLUŞTURARAK SİPARİŞ
+-------------------------------------------
+
+Sipariş oluştururken aynı zamanda yeni bir müşteri de oluşturursunuz.
+
+KULLANIM:
+{
+  "items": [...],
+  "payment_method": "pos",
+  "new_customer": {                      // ← Yeni müşteri bilgileri
+    "first_name": "Ali",                 // Zorunlu
+    "last_name": "Veli",                 // Zorunlu
+    "email": "ali@example.com",          // Zorunlu (unique olmalı)
+    "phone": "+905551234567",            // Opsiyonel
+    "address": {                         // Opsiyonel
+      "address1": "Atatürk Cad. No:123", // Ana adres
+      "address2": "Daire 5",             // Ek adres (kat, daire vb.)
+      "city": "Istanbul",                // Şehir
+      "province": "Istanbul",            // İl/Eyalet
+      "country": "Turkey",               // Ülke (default: Turkey)
+      "zip": "34000"                     // Posta kodu
+    }
+  }
+}
+
+NASIL ÇALIŞIR:
+1. Sistem önce bu email'in var olup olmadığını kontrol eder
+2. Varsa mevcut müşteriyi kullanır
+3. Yoksa Shopify'da yeni müşteri oluşturur
+4. Yerel DB'ye kaydeder
+5. Siparişi bu müşteriye atar
+
+ZORUNLU ALANLAR (new_customer için):
+- first_name
+- last_name
+- email
+
+OPSİYONEL ALANLAR:
+- phone
+- address (tüm alt alanları opsiyonel)
+
+================================================================================
+                          DETAYLI KULLANIM ÖRNEKLERİ
+================================================================================
+
+ÖRNEK 1: MEVCUT MÜŞTERİ + TEK BARKODLU ÜRÜN
+============================================
+
+REQUEST:
+--------
+POST http://localhost:8080/orders/create-cart
+Content-Type: application/json
+
+{
+  "items": [
+    {
+      "barcode": "88834856",
+      "quantity": 1
+    }
+  ],
+  "payment_method": "cash",
+  "email": "ahmet@example.com"
+}
+
+AÇIKLAMA:
+- Barkodu "88834856" olan üründen 1 adet
+- Nakit ödeme
+- ahmet@example.com adresli müşteriye sipariş
+
+RESPONSE:
+---------
+{
+  "status": "success",
+  "message": "Order created with 1 items (cash)",
+  "shopify_order_id": 6887668187432,
+  "shopify_order_number": 3731,
+  "original_amount": 1899.0,
+  "final_amount": 1899.0,
+  "items_count": 1,
+  "orders": [
+    {
+      "id": 150,
+      "shopify_order_id": 6887668187432,
+      "customer_id": 50,
+      "product_id": 100,
+      "barcode": "88834856",
+      "title": "032C 'DAZZLE' Mockneck Sweatshirt",
+      "quantity": 1,
+      "price": 1899.0,
+      "payment_method": "cash",
+      "status": "completed",
+      "created_at": "2024-11-15T14:30:00"
+    }
+  ],
+  "discount_applied": 0,
+  "discount_reason": null
+}
+
+
+ÖRNEK 2: MEVCUT MÜŞTERİ + ÇOKLU BARKODLU ÜRÜN + İNDİRİM
+========================================================
+
+REQUEST:
+--------
+{
+  "items": [
+    {
+      "barcode": "88834856",
+      "quantity": 2
+    },
+    {
+      "barcode": "21464872",
+      "quantity": 1
+    }
+  ],
+  "payment_method": "pos",
+  "email": "mehmet@example.com",
+  "discount": 500,
+  "discount_reason": "Sadık müşteri indirimi"
+}
+
+AÇIKLAMA:
+- Barkodu "88834856" olan üründen 2 adet
+- Barkodu "21464872" olan üründen 1 adet
+- POS ile ödeme
+- 500 TL indirim uygulanıyor
+- mehmet@example.com adresli müşteriye sipariş
+
+RESPONSE:
+---------
+{
+  "status": "success",
+  "message": "Order created with 2 items (pos)",
+  "shopify_order_id": 6887668220200,
+  "shopify_order_number": 3732,
+  "original_amount": 5597.0,
+  "final_amount": 5097.0,
+  "items_count": 2,
+  "orders": [...],
+  "discount_applied": 500.0,
+  "discount_reason": "Sadık müşteri indirimi"
+}
+
+
+ÖRNEK 3: YENİ MÜŞTERİ + TEK BARKODLU ÜRÜN
+==========================================
+
+REQUEST:
+--------
+{
+  "items": [
+    {
+      "barcode": "88867624",
+      "quantity": 1
+    }
+  ],
+  "payment_method": "cash",
+  "new_customer": {
+    "first_name": "Ayşe",
+    "last_name": "Demir",
+    "email": "ayse.demir@example.com",
+    "phone": "+905551112233"
+  }
+}
+
+AÇIKLAMA:
+- Yeni müşteri oluşturuluyor: Ayşe Demir
+- Email: ayse.demir@example.com
+- Telefon: +905551112233
+- Barkodu "88867624" olan üründen 1 adet
+- Nakit ödeme
+
+RESPONSE:
+---------
+{
+  "status": "success",
+  "message": "Order created with 1 items (cash)",
+  "shopify_order_id": 6887668253000,
+  "shopify_order_number": 3733,
+  "original_amount": 1899.0,
+  "final_amount": 1899.0,
+  "items_count": 1,
+  "orders": [
+    {
+      "id": 151,
+      "shopify_order_id": 6887668253000,
+      "customer_id": 3333,  // ← Yeni oluşturulan müşteri ID'si
+      "product_id": 7,
+      "barcode": "88867624",
+      "title": "032C 'DAZZLE' Mockneck Sweatshirt",
+      "quantity": 1,
+      "price": 1899.0,
+      "payment_method": "cash",
+      "status": "completed",
+      "created_at": "2024-11-15T14:35:00"
+    }
+  ],
+  "discount_applied": 0,
+  "discount_reason": null
+}
+
+
+ÖRNEK 4: YENİ MÜŞTERİ + TAM ADRES + BARKODLU ÜRÜN
+==================================================
+
+REQUEST:
+--------
+{
+  "items": [
+    {
+      "barcode": "21497640",
+      "quantity": 2
+    }
+  ],
+  "payment_method": "pos",
+  "new_customer": {
+    "first_name": "Can",
+    "last_name": "Yılmaz",
+    "email": "can.yilmaz@example.com",
+    "phone": "+905559998877",
+    "address": {
+      "address1": "Cumhuriyet Bulvarı No:456",
+      "address2": "Kat 3, Daire 8",
+      "city": "Ankara",
+      "province": "Ankara",
+      "country": "Turkey",
+      "zip": "06100"
+    }
+  },
+  "discount": 200
+}
+
+AÇIKLAMA:
+- Yeni müşteri tam adres bilgileri ile oluşturuluyor
+- Adres: Cumhuriyet Bulvarı No:456, Kat 3, Daire 8, Ankara
+- Barkodu "21497640" olan üründen 2 adet
+- POS ile ödeme
+- 200 TL indirim
+
+RESPONSE:
+---------
+{
+  "status": "success",
+  "message": "Order created with 1 items (pos)",
+  "shopify_order_id": 6887668285768,
+  "shopify_order_number": 3734,
+  "original_amount": 3598.0,
+  "final_amount": 3398.0,
+  "items_count": 1,
+  "orders": [...],
+  "discount_applied": 200.0,
+  "discount_reason": "Store discount"
+}
+
+
+ÖRNEK 5: MEVCUT MÜŞTERİ + TEK ÖZEL ÜRÜN
+========================================
+
+REQUEST:
+--------
+{
+  "items": [
+    {
+      "type": "custom",
+      "title": "Özel Tasarım Tişört",
+      "size": "XL",
+      "price": 350.0,
+      "quantity": 1
+    }
+  ],
+  "payment_method": "cash",
+  "email": "zeynep@example.com"
+}
+
+AÇIKLAMA:
+- Envanterde olmayan özel bir ürün
+- Ürün adı: Özel Tasarım Tişört
+- Beden: XL
+- Fiyat: 350 TL
+- Adet: 1
+- zeynep@example.com adresli müşteriye sipariş
+- Nakit ödeme
+
+RESPONSE:
+---------
+{
+  "status": "success",
+  "message": "Order created with 1 items (cash)",
+  "shopify_order_id": 6887668318536,
+  "shopify_order_number": 3735,
+  "original_amount": 350.0,
+  "final_amount": 350.0,
+  "items_count": 1,
+  "orders": [
+    {
+      "id": 152,
+      "shopify_order_id": 6887668318536,
+      "customer_id": 75,
+      "product_id": null,  // ← Custom ürün için null
+      "barcode": null,     // ← Custom ürün için null
+      "title": "Özel Tasarım Tişört - XL",
+      "quantity": 1,
+      "price": 350.0,
+      "payment_method": "cash",
+      "status": "completed",
+      "created_at": "2024-11-15T14:40:00"
+    }
+  ],
+  "discount_applied": 0,
+  "discount_reason": null
+}
+
+
+ÖRNEK 6: YENİ MÜŞTERİ + KARIŞIK SEPET (BARKODLU + ÖZEL ÜRÜN)
+=============================================================
+
+REQUEST:
+--------
+{
+  "items": [
+    {
+      "barcode": "88834856",
+      "quantity": 1
+    },
+    {
+      "barcode": "21464872",
+      "quantity": 2
+    },
+    {
+      "type": "custom",
+      "title": "Özel Baskılı Hoodie",
+      "size": "L",
+      "price": 450.0,
+      "quantity": 1
+    },
+    {
+      "type": "custom",
+      "title": "Tasarım Şapka",
+      "price": 150.0,
+      "quantity": 2
+    }
+  ],
+  "payment_method": "pos",
+  "new_customer": {
+    "first_name": "Deniz",
+    "last_name": "Kaya",
+    "email": "deniz.kaya@example.com",
+    "phone": "+905556667788",
+    "address": {
+      "address1": "İstiklal Caddesi No:789",
+      "city": "İzmir",
+      "country": "Turkey"
+    }
+  },
+  "discount": 300,
+  "discount_reason": "Toplu alım indirimi"
+}
+
+AÇIKLAMA:
+- Yeni müşteri: Deniz Kaya
+- Karışık sepet:
+  * 1 adet barkodlu ürün (88834856)
+  * 2 adet barkodlu ürün (21464872)
+  * 1 adet özel ürün (Hoodie - 450 TL)
+  * 2 adet özel ürün (Şapka - 150 TL)
+- Toplam 4 farklı ürün, 6 adet
+- POS ile ödeme
+- 300 TL indirim
+
+RESPONSE:
+---------
+{
+  "status": "success",
+  "message": "Order created with 4 items (pos)",
+  "shopify_order_id": 6887668351304,
+  "shopify_order_number": 3736,
+  "original_amount": 5647.0,
+  "final_amount": 5347.0,
+  "items_count": 4,
+  "orders": [
+    {
+      "id": 153,
+      "shopify_order_id": 6887668351304,
+      "customer_id": 3334,
+      "product_id": 5,
+      "barcode": "88834856",
+      "title": "032C 'DAZZLE' Mockneck Sweatshirt",
+      "quantity": 1,
+      "price": 1899.0,
+      "payment_method": "pos",
+      "status": "completed"
+    },
+    {
+      "id": 154,
+      "shopify_order_id": 6887668351304,
+      "customer_id": 3334,
+      "product_id": 8,
+      "barcode": "21464872",
+      "title": "032C Black Flared Lounge Pants",
+      "quantity": 2,
+      "price": 1799.0,
+      "payment_method": "pos",
+      "status": "completed"
+    },
+    {
+      "id": 155,
+      "shopify_order_id": 6887668351304,
+      "customer_id": 3334,
+      "product_id": null,
+      "barcode": null,
+      "title": "Özel Baskılı Hoodie - L",
+      "quantity": 1,
+      "price": 450.0,
+      "payment_method": "pos",
+      "status": "completed"
+    },
+    {
+      "id": 156,
+      "shopify_order_id": 6887668351304,
+      "customer_id": 3334,
+      "product_id": null,
+      "barcode": null,
+      "title": "Tasarım Şapka",
+      "quantity": 2,
+      "price": 150.0,
+      "payment_method": "pos",
+      "status": "completed"
+    }
+  ],
+  "discount_applied": 300.0,
+  "discount_reason": "Toplu alım indirimi"
+}
+
+NOT: Aynı Shopify sipariş ID'sine (6887668351304) sahip 4 ayrı local order 
+     kaydı oluşturuldu. Bu normal bir durumdur.
+
+
+ÖRNEK 7: MEVCUT MÜŞTERİ + SADECE ÖZEL ÜRÜNLER
+==============================================
+
+REQUEST:
+--------
+{
+  "items": [
+    {
+      "type": "custom",
+      "title": "Özel Tasarım Gömlek",
+      "size": "M",
+      "price": 400.0,
+      "quantity": 1
+    },
+    {
+      "type": "custom",
+      "title": "İşlemeli Pantolon",
+      "size": "32",
+      "price": 550.0,
+      "quantity": 1
+    }
+  ],
+  "payment_method": "cash",
+  "email": "fatma@example.com",
+  "discount": 100,
+  "discount_reason": "Özel müşteri indirimi"
+}
+
+AÇIKLAMA:
+- Sadece özel ürünlerden oluşan sipariş
+- 2 farklı özel ürün
+- Mevcut müşteri: fatma@example.com
+- Nakit ödeme
+- 100 TL indirim
+
+RESPONSE:
+---------
+{
+  "status": "success",
+  "message": "Order created with 2 items (cash)",
+  "shopify_order_id": 6887668384072,
+  "shopify_order_number": 3737,
+  "original_amount": 950.0,
+  "final_amount": 850.0,
+  "items_count": 2,
+  "orders": [
+    {
+      "id": 157,
+      "shopify_order_id": 6887668384072,
+      "customer_id": 42,
+      "product_id": null,
+      "barcode": null,
+      "title": "Özel Tasarım Gömlek - M",
+      "quantity": 1,
+      "price": 400.0,
+      "payment_method": "cash",
+      "status": "completed"
+    },
+    {
+      "id": 158,
+      "shopify_order_id": 6887668384072,
+      "customer_id": 42,
+      "product_id": null,
+      "barcode": null,
+      "title": "İşlemeli Pantolon - 32",
+      "quantity": 1,
+      "price": 550.0,
+      "payment_method": "cash",
+      "status": "completed"
+    }
+  ],
+  "discount_applied": 100.0,
+  "discount_reason": "Özel müşteri indirimi"
+}
+
+================================================================================
+                            HATA DURUMLARI
+================================================================================
+
+HATA 1: MÜŞTERİ BİLGİSİ EKSİK
+------------------------------
+REQUEST:
+{
+  "items": [{"barcode": "88834856", "quantity": 1}],
+  "payment_method": "cash"
+  // ← email veya new_customer yok!
+}
+
+RESPONSE (400 Bad Request):
+{
+  "detail": "Either 'email' (for existing customer) or 'new_customer' 
+             (to create new) must be provided"
+}
+
+
+HATA 2: HEM EMAIL HEM NEW_CUSTOMER KULLANILMIŞ
+-----------------------------------------------
+REQUEST:
+{
+  "items": [{"barcode": "88834856", "quantity": 1}],
+  "payment_method": "cash",
+  "email": "test@example.com",
+  "new_customer": {
+    "first_name": "Ali",
+    "last_name": "Veli",
+    "email": "ali@example.com"
+  }
+  // ← İkisi birden kullanılmış!
+}
+
+RESPONSE (400 Bad Request):
+{
+  "detail": "Provide either 'email' OR 'new_customer', not both"
+}
+
+
+HATA 3: MEVCUT MÜŞTERİ BULUNAMADI
+----------------------------------
+REQUEST:
+{
+  "items": [{"barcode": "88834856", "quantity": 1}],
+  "payment_method": "cash",
+  "email": "yokolan@example.com"
+}
+
+RESPONSE (404 Not Found):
+{
+  "detail": "Customer with email 'yokolan@example.com' not found. 
+             Use 'new_customer' to create a new one."
+}
+
+
+HATA 4: BARKODLU ÜRÜN BULUNAMADI
+---------------------------------
+REQUEST:
+{
+  "items": [{"barcode": "999999", "quantity": 1}],
+  "payment_method": "cash",
+  "email": "test@example.com"
+}
+
+RESPONSE (400 Bad Request):
+{
+  "detail": "No valid products found in cart"
+}
+
+NOT: Sistem barkodu bulamayan ürünleri atlar ve devam eder. Eğer hiçbir 
+     geçerli ürün kalmazsa bu hatayı verir.
+
+
+HATA 5: GEÇERSİZ ÖDEME YÖNTEMİ
+-------------------------------
+REQUEST:
+{
+  "items": [{"barcode": "88834856", "quantity": 1}],
+  "payment_method": "kredi_karti",  // ← Geçersiz!
+  "email": "test@example.com"
+}
+
+RESPONSE (400 Bad Request):
+{
+  "detail": "Invalid payment method. Must be 'cash' or 'pos'."
+}
+
+
+HATA 6: İNDİRİM TUTARI ÇOK YÜKSEK
+----------------------------------
+REQUEST:
+{
+  "items": [{"barcode": "88834856", "quantity": 1}],
+  "payment_method": "cash",
+  "email": "test@example.com",
+  "discount": 5000  // ← Toplam tutardan fazla!
+}
+
+RESPONSE (400 Bad Request):
+{
+  "detail": "Discount amount (5000) cannot be greater than or equal 
+             to total (1899)"
+}
+
+
+HATA 7: YENİ MÜŞTERİ ZORUNLU ALAN EKSİK
+----------------------------------------
+REQUEST:
+{
+  "items": [{"barcode": "88834856", "quantity": 1}],
+  "payment_method": "cash",
+  "new_customer": {
+    "first_name": "Ali"
+    // ← last_name ve email eksik!
+  }
+}
+
+RESPONSE (422 Validation Error):
+{
+  "detail": [
+    {
+      "loc": ["body", "new_customer", "last_name"],
+      "msg": "field required",
+      "type": "value_error.missing"
+    },
+    {
+      "loc": ["body", "new_customer", "email"],
+      "msg": "field required",
+      "type": "value_error.missing"
+    }
+  ]
+}
+
+
+HATA 8: ÖZEL ÜRÜN FİYATI EKSİK VEYA SIFIR
+------------------------------------------
+REQUEST:
+{
+  "items": [
+    {
+      "type": "custom",
+      "title": "Özel Ürün",
+      "price": 0  // ← Sıfır olamaz!
+    }
+  ],
+  "payment_method": "cash",
+  "email": "test@example.com"
+}
+
+RESPONSE:
+Sistem bu ürünü atlar ve devam eder. Eğer sepette başka ürün yoksa:
+{
+  "detail": "No valid products found in cart"
+}
+
+
+HATA 9: SHOPIFY API HATASI
+---------------------------
+Shopify'a bağlanılamadığında veya Shopify hata döndürdüğünde:
+
+RESPONSE (500 Internal Server Error):
+{
+  "detail": "Order creation failed: 422 Client Error: unknown for url: 
+             https://87eae6.myshopify.com/admin/api/2024-10/orders.json"
+}
+
+================================================================================
+                          ÖNEMLİ NOTLAR VE İPUÇLARI
+================================================================================
+
+1. BARKODLU ÜRÜNLER İÇİN:
+   ----------------------
+   - Barkod mutlaka sistemde kayıtlı olmalı
+   - Önce /products/barcode/{barcode} ile kontrol edebilirsiniz
+   - Aynı barkoda sahip birden fazla varyant varsa stoklu olan seçilir
+   - Stok kontrolü yapılmaz, 0 stoklu ürün de sipariş edilebilir
+
+2. ÖZEL ÜRÜNLER İÇİN:
+   -------------------
+   - Envanterde olmayan ürünler için kullanılır
+   - Fiyat mutlaka belirtilmeli ve 0'dan büyük olmalı
+   - Size/beden opsiyoneldir
+   - Shopify'a "manual" tag'i ile kaydedilir
+
+3. KARIŞIK SEPET:
+   --------------
+   - Aynı sipariş içinde hem barkodlu hem özel ürün olabilir
+   - Sınırsız sayıda ürün eklenebilir
+   - Her ürün ayrı bir local order kaydı olarak saklanır
+   - Hepsi aynı Shopify order ID'sine sahip olur
+
+4. YENİ MÜŞTERİ OLUŞTURURKEN:
+   --------------------------
+   - Email unique olmalı (daha önce kullanılmamış)
+   - Telefon numarası da unique olmalı
+   - Eğer email zaten varsa, mevcut müşteri kullanılır
+   - Adres bilgileri tamamen opsiyoneldir
+   - Müşteri hem Shopify'da hem local DB'de oluşturulur
+
+5. MEVCUT MÜŞTERİ KULLANIRKEN:
+   ---------------------------
+   - Email ile arama yapılır
+   - Önce local DB'de aranır (hızlı)
+   - Bulunamazsa Shopify'da aranır
+   - Shopify'da bulunursa local DB'ye kaydedilir
+   - Hiçbir yerde bulunamazsa hata döner
+
+6. İNDİRİM SİSTEMİ:
+   ----------------
+   - İndirim toplam tutardan düşülür
+   - İndirim toplam tutara eşit veya büyük olamaz
+   - İndirim nedeni opsiyoneldir
+   - Shopify'da hem line item hem de note olarak kaydedilir
+
+7. ÖDEME YÖNTEMLERİ:
+   -----------------
+   - "cash": Nakit ödeme
+   - "pos": POS/Kredi kartı ödemesi
+   - Shopify'da "paid" (ödendi) olarak işaretlenir
+   - Transaction otomatik oluşturulur
+
+8. SHOPIFY'A KAYIT:
+   ----------------
+   - Tüm siparişler Shopify'a kaydedilir
+   - "in-store" tag'i otomatik eklenir
+   - Ödeme yöntemine göre "cash" veya "pos" tag'i eklenir
+   - Manuel ürünler için "manual" tag'i eklenir
+   - Financial status: "paid" olarak ayarlanır
+
+9. LOCAL DB'YE KAYIT:
+   ------------------
+   - Her ürün ayrı bir order kaydı olarak saklanır
+   - Aynı Shopify order ID'sine sahip olurlar
+   - Customer ID foreign key olarak bağlanır
+   - Product ID barkodlu ürünler için, null özel ürünler için
+
+10. PERFORMANS:
+    -----------
+    - Büyük sepetler için işlem süresi uzayabilir
+    - Her ürün için ayrı DB sorgusu yapılır
+    - Shopify API'ye tek bir request gönderilir
+    - Transaction kullanıldığı için hata durumunda rollback yapılır
+
+================================================================================
+                          CURL KOMUT ÖRNEKLERİ
+================================================================================
+
+# Örnek 1: Mevcut müşteri + barkodlu ürün
+curl -X POST "http://localhost:8080/orders/create-cart" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [{"barcode": "88834856", "quantity": 2}],
+    "payment_method": "cash",
+    "email": "customer@example.com"
+  }'
+
+# Örnek 2: Yeni müşteri + özel ürün
+curl -X POST "http://localhost:8080/orders/create-cart" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      {
+        "type": "custom",
+        "title": "Özel Tişört",
+        "size": "L",
+        "price": 250.0,
+        "quantity": 1
+      }
+    ],
+    "payment_method": "pos",
+    "new_customer": {
+      "first_name": "Ali",
+      "last_name": "Veli",
+      "email": "ali@example.com",
+      "phone": "+905551234567"
+    }
+  }'
+
+# Örnek 3: Karışık sepet + indirim
+curl -X POST "http://localhost:8080/orders/create-cart" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      {"barcode": "88834856", "quantity": 1},
+      {"barcode": "21464872", "quantity": 2},
+      {
+        "type": "custom",
+        "title": "Özel Hoodie",
+        "price": 450.0,
+        "quantity": 1
+      }
+    ],
+    "payment_method": "cash",
+    "email": "customer@example.com",
+    "discount": 200,
+    "discount_reason": "VIP müşteri indirimi"
+  }'
+
+================================================================================
+                          PYTHON KULLANIM ÖRNEKLERİ
+================================================================================
+
+import requests
+
+BASE_URL = "http://localhost:8080"
+
+# Örnek 1: Mevcut müşteri ile sipariş
+def create_order_existing_customer():
+    payload = {
+        "items": [
+            {"barcode": "88834856", "quantity": 2}
+        ],
+        "payment_method": "cash",
+        "email": "customer@example.com",
+        "discount": 100
+    }
+    
+    response = requests.post(
+        f"{BASE_URL}/orders/create-cart",
+        json=payload
+    )
+    
+    return response.json()
+
+# Örnek 2: Yeni müşteri ile sipariş
+def create_order_new_customer():
+    payload = {
+        "items": [
+            {"barcode": "88834856", "quantity": 1},
+            {
+                "type": "custom",
+                "title": "Özel Ürün",
+                "size": "L",
+                "price": 250.0,
+                "quantity": 1
+            }
+        ],
+        "payment_method": "pos",
+        "new_customer": {
+            "first_name": "Ayşe",
+            "last_name": "Yılmaz",
+            "email": "ayse@example.com",
+            "phone": "+905551234567",
+            "address": {
+                "address1": "Atatürk Cad. No:123",
+                "city": "Istanbul",
+                "country": "Turkey"
+            }
+        },
+        "discount": 50
+    }
+    
+    response = requests.post(
+        f"{BASE_URL}/orders/create-cart",
+        json=payload
+    )
+    
+    return response.json()
+
+# Kullanım
+try:
+    result = create_order_new_customer()
+    print(f"✅ Sipariş oluşturuldu!")
+    print(f"Shopify Order ID: {result['shopify_order_id']}")
+    print(f"Toplam Tutar: {result['final_amount']} TL")
+except Exception as e:
+    print(f"❌ Hata: {e}")
+
+================================================================================
+                          JAVASCRIPT KULLANIM ÖRNEKLERİ
+================================================================================
+
+const axios = require('axios');
+
+const BASE_URL = 'http://localhost:8080';
+
+// Örnek 1: Mevcut müşteri ile sipariş
+async function createOrderExistingCustomer() {
+  const payload = {
+    items: [
+      { barcode: '88834856', quantity: 2 }
+    ],
+    payment_method: 'cash',
+    email: 'customer@example.com',
+    discount: 100
+  };
+  
+  const response = await axios.post(
+    `${BASE_URL}/orders/create-cart`,
+    payload
+  );
+  
+  return response.data;
+}
+
+// Örnek 2: Yeni müşteri ile karışık sepet
+async function createOrderNewCustomerMixed() {
+  const payload = {
+    items: [
+      { barcode: '88834856', quantity: 1 },
+      { barcode: '21464872', quantity: 2 },
+      {
+        type: 'custom',
+        title: 'Özel Tasarım Tişört',
+        size: 'XL',
+        price: 350.0,
+        quantity: 1
+      }
+    ],
+    payment_method: 'pos',
+    new_customer: {
+      first_name: 'Mehmet',
+      last_name: 'Demir',
+      email: 'mehmet@example.com',
+      phone: '+905551234567',
+      address: {
+        address1: 'İstiklal Cad. No:789',
+        city: 'İzmir',
+        country: 'Turkey'
+      }
+    },
+    discount: 200,
+    discount_reason: 'Toplu alım indirimi'
+  };
+  
+  const response = await axios.post(
+    `${BASE_URL}/orders/create-cart`,
+    payload
+  );
+  
+  return response.data;
+}
+
+// Kullanım
+(async () => {
+  try {
+    const result = await createOrderNewCustomerMixed();
+    console.log('✅ Sipariş oluşturuldu!');
+    console.log(`Shopify Order ID: ${result.shopify_order_id}`);
+    console.log(`Toplam Tutar: ${result.final_amount} TL`);
+    console.log(`Ürün Sayısı: ${result.items_count}`);
+  } catch (error) {
+    console.error('❌ Hata:', error.response?.data || error.message);
+  }
+})();
+
+================================================================================
+                          BEST PRACTICES (EN İYİ UYGULAMALAR)
+================================================================================
+
+1. MÜŞTERİ KONTROLÜ:
+   - Sipariş oluşturmadan önce müşteriyi kontrol edin
+   - GET /customers/search?email=... ile arayın
+   - Varsa email kullanın, yoksa new_customer kullanın
+
+2. BARKOD DOĞRULAMA:
+   - Barkodu okuduktan sonra GET /products/barcode/{barcode} ile kontrol edin
+   - Ürün bilgilerini kullanıcıya gösterin
+   - Stok durumunu kontrol edin (opsiyonel)
+
+3. HATA YÖNETİMİ:
+   - Try-catch bloklarını kullanın
+   - Hata mesajlarını kullanıcıya gösterin
+   - 404 hatalarında "yeni müşteri oluştur" seçeneği sunun
+
+4. KULLANICI DENEYİMİ:
+   - Sepet toplamını gerçek zamanlı gösterin
+   - İndirim uygulandığında önceki ve yeni tutarı gösterin
+   - Sipariş oluşturulduktan sonra order number'ı gösterin
+
+5. GÜVENLİK:
+   - Email validasyonu yapın
+   - Telefon numarası formatını kontrol edin
+   - Fiyatların pozitif olduğundan emin olun
+   - İndirim tutarının mantıklı olduğunu kontrol edin
+
+6. PERFORMANS:
+   - Müşteri bilgilerini cache'leyin
+   - Sık kullanılan ürünleri önbelleğe alın
+   - Büyük sepetler için loading göstergesi kullanın
+
+7. VERİ TUTARLILIĞI:
+   - Sipariş oluştuktan sonra local DB'yi kontrol edin
+   - Shopify'da da siparişin oluştuğunu doğrulayın
+   - Webhook'larla otomatik senkronizasyon kurun
+
+================================================================================
+                          SORU - CEVAP (FAQ)
+================================================================================
+
+S1: Aynı sepette hem barkodlu hem özel ürün olabilir mi?
+C1: Evet! İstediğiniz kadar barkodlu ve özel ürünü karıştırabilirsiniz.
+
+S2: Yeni müşteri oluştururken adres zorunlu mu?
+C2: Hayır, sadece first_name, last_name ve email zorunludur. Adres opsiyoneldir.
+
+S3: Stok kontrolü yapılıyor mu?
+C3: Hayır, 0 stoklu ürün de sipariş edilebilir. İsterseniz önce stok kontrolü 
+    yapabilirsiniz.
+
+S4: İndirim nasıl uygulanır?
+C4: İndirim toplam tutardan düşülür ve Shopify'a hem line item hem de note 
+    olarak kaydedilir.
+
+S5: Aynı müşteri email'i ile yeni müşteri oluşturursam ne olur?
+C5: Sistem mevcut müşteriyi kullanır, yeni müşteri oluşturmaz.
+
+S6: Sipariş Shopify'da nasıl görünür?
+C6: Normal bir sipariş gibi görünür. "in-store", "cash"/"pos" ve "manual" 
+    (varsa) tag'leri ile işaretlidir.
+
+S7: Local DB'de sipariş nasıl saklanır?
+C7: Her ürün ayrı bir order kaydı olarak saklanır. Hepsi aynı shopify_order_id'ye 
+    sahiptir.
+
+S8: Ödeme durumu ne olur?
+C8: Tüm siparişler "paid" (ödendi) olarak işaretlenir çünkü POS siparişleridir.
+
+S9: Webhook'lar sipariş oluşturduğumda tetiklenir mi?
+C9: Evet, Shopify'da sipariş oluştuğu için orders/create webhook'u tetiklenir.
+
+S10: Hata durumunda ne olur?
+C10: Transaction kullanıldığı için hata durumunda tüm işlemler geri alınır 
+     (rollback). Ne Shopify'da ne de local DB'de kayıt oluşmaz.
+
+================================================================================
+                          SON NOTLAR
+================================================================================
+
+Bu endpoint, POS sisteminin en önemli parçasıdır. Hem barkodlu hem de özel 
+ürünlerle çalışabilmesi, yeni müşteri oluşturabilmesi ve karışık sepet 
+desteği sayesinde çok esnek bir yapıya sahiptir.
+
+Herhangi bir sorunuz veya öneriniz varsa lütfen bildirin!
+
+Son Güncelleme: 15 Kasım 2024
+API Version: 1.0.0
+Endpoint: POST /orders/create-cart
+
+================================================================================
+
